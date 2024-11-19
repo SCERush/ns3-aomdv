@@ -1,0 +1,11 @@
+*.csv
+*.xml
+*.neighbors
+*.routes
+*.tr
+
+
+__pycache__/
+build/
+.waf*
+.lock-waf_*_build
