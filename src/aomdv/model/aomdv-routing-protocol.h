@@ -107,6 +107,18 @@ public:
   */
   int64_t AssignStreams (int64_t stream);
 
+
+  void SetMaliciousEnable(bool f)
+  {
+    IsMalicious = f;
+  }
+
+  bool GetMaliciousEnable() const
+  {
+    return IsMalicious;
+  }
+
+
 protected:
   virtual void DoInitialize (void);
 private:
@@ -177,6 +189,11 @@ private:
   uint16_t m_rreqCount;
   /// Number of RERRs used for RERR rate control
   uint16_t m_rerrCount;
+
+
+  bool IsMalicious;
+  int m_flag;
+
 
 private:
   /// Start protocol operation
