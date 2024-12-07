@@ -166,7 +166,7 @@ int main(int argc, char *argv[])
 
     for (uint32_t i = 0; i < numNodes; i++)
     {
-        if (i == 8 || i == 18 || i == 9 || i == 19)
+        if (i == 88)
         {
             malicious.Add(c.Get(i));
         }
