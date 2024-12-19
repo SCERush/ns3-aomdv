@@ -90,9 +90,14 @@ public:
     Time m_ts;         // time when we saw this nexthop
     // CHANGE
     bool m_pathError;
+    // 新增的字段：PUF和哈希字段
+    uint32_t m_rrepR1;
+    uint32_t m_rrepR2;
+    uint32_t m_hash;
     
     Path (Ptr<NetDevice> dev, Ipv4Address dst, Ipv4Address nextHop, uint16_t hopCount, Time expireTime, 
-          Ipv4Address lastHop, Ipv4InterfaceAddress iface);
+          Ipv4Address lastHop, Ipv4InterfaceAddress iface,
+          uint32_t rrepR1, uint32_t rrepR2, uint32_t hash);
 
     Ptr<Ipv4Route> GetRoute () const { return m_ipv4Route; }
     void SetRoute (Ptr<Ipv4Route> r) { m_ipv4Route = r; }
@@ -100,6 +105,14 @@ public:
     Ipv4Address GetNextHop () const { return m_ipv4Route->GetGateway (); }
     void SetLastHop (Ipv4Address lastHop) { m_lastHop = lastHop; }
     Ipv4Address GetLastHop () const { return m_lastHop; }
+    // 新增的 PUF 和哈希字段操作函数
+    void SetRrepR1 (uint32_t rrepR1) { m_rrepR1 = rrepR1; }
+    uint32_t GetRrepR1 () const { return m_rrepR1; }
+    void SetRrepR2 (uint32_t rrepR2) { m_rrepR2 = rrepR2; }
+    uint32_t GetRrepR2 () const { return m_rrepR2; }
+    void SetHash (uint32_t hash) { m_hash = hash; }
+    uint32_t GetHash () const { return m_hash; }
+
     void SetOutputDevice (Ptr<NetDevice> dev) { m_ipv4Route->SetOutputDevice (dev); }
     Ptr<NetDevice> GetOutputDevice () const { return m_ipv4Route->GetOutputDevice (); }
     void SetHopCount (uint16_t hop) { m_hopCount = hop; }
@@ -117,7 +130,8 @@ public:
   /// Path functions - contribution
   void PrintPaths ();
   struct Path* PathInsert (Ptr<NetDevice> dev, Ipv4Address nextHop, uint16_t hopCount, 
-                           Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface);
+                           Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface,
+                           uint32_t rrepR1, uint32_t rrepR2, uint32_t hash);
   struct Path* PathLookup (Ipv4Address id);
   struct Path* PathLookupDisjoint (Ipv4Address nh, Ipv4Address lh);
   bool PathNewDisjoint (Ipv4Address nh, Ipv4Address lh);

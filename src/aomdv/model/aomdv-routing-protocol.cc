@@ -286,6 +286,39 @@ RoutingProtocol::~RoutingProtocol ()
 {
 }
 
+uint32_t 
+RoutingProtocol::GenerateRandomChallenge() 
+{
+  // 生成一个非零的随机数作为挑战
+  uint32_t challenge = rand() % 100000 + 1; // 确保生成的挑战不为0
+  return challenge;
+}
+
+uint32_t
+RoutingProtocol::CalculatePufResponse(uint32_t challenge)
+{
+  uint32_t response = challenge ^ 0xA5A5A5A5;  // 通过异或操作计算响应，实际PUF操作可以复杂得多
+  return response;
+}
+
+uint32_t
+RoutingProtocol::CalculateAlpha(uint32_t response1, uint32_t response2)
+{
+  // 计算 α，使用两个响应的异或运算
+  uint32_t alpha = response1 ^ response2;  // 异或操作计算 α
+  return alpha;
+}
+
+void
+RoutingProtocol::StorePufValues(uint32_t x1, uint32_t x2, uint32_t alpha)
+{
+  // 存储两个挑战和验证值 α，可能存储到路由表或其他数据结构中
+  NS_LOG_DEBUG("Storing PUF values: x1=" << x1 << ", x2=" << x2 << ", alpha=" << alpha);
+
+  // 这里可以根据需求将其存储到某个数据结构中
+  m_pufChallengesAndAlpha.push_back(std::make_tuple(x1, x2, alpha));
+}
+
 void
 RoutingProtocol::DoDispose ()
 {
@@ -613,13 +646,15 @@ RoutingProtocol::SetIpv4 (Ptr<Ipv4> ipv4)
   NS_ASSERT (m_ipv4->GetNInterfaces () == 1 && m_ipv4->GetAddress (0, 0).GetLocal () == Ipv4Address ("127.0.0.1"));
   m_lo = m_ipv4->GetNetDevice (0);
   NS_ASSERT (m_lo != 0);
-  // Remember lo route
+  // Remember lo route and include PUF-related values (RREP's rrepR1, rrepR2, and hash)
   RoutingTableEntry rt (/*dst=*/ Ipv4Address::GetLoopback (), /*validSeqNo=*/ true, /*seqno=*/ 0, 
                               /*lifeTime=*/ Simulator::GetMaximumSimulationTime ());
   rt.PathInsert (/*device=*/ m_lo, /*nextHop=*/ Ipv4Address::GetLoopback (), /*hop=*/ 1, 
                  /*expireTime=*/ Simulator::GetMaximumSimulationTime (), 
                  /*lastHop=*/ Ipv4Address::GetLoopback (), 
-                 /*iface=*/ Ipv4InterfaceAddress (Ipv4Address::GetLoopback (), Ipv4Mask ("255.0.0.0")));
+                 /*iface=*/ Ipv4InterfaceAddress (Ipv4Address::GetLoopback (), Ipv4Mask ("255.0.0.0")),
+                 /*rrepR1=*/ 0, /*rrepR2=*/ 0,
+                 /*hash=*/ 0);
   m_routingTable.AddRoute (rt);
   Simulator::ScheduleNow (&RoutingProtocol::Start, this);
 }
@@ -669,7 +704,8 @@ RoutingProtocol::NotifyInterfaceUp (uint32_t i)
   rt.PathInsert (/*device=*/ dev, /*nextHop=*/ iface.GetBroadcast (), /*hop=*/ 1, 
                  /*expireTime=*/ Simulator::GetMaximumSimulationTime (), 
                  /*lastHop=*/ iface.GetBroadcast (), 
-                 /*iface=*/ iface);
+                 /*iface=*/ iface,
+                 /*rrepR1=*/ 0, /*rrepR2=*/ 0, /*hash=*/ 0);
   m_routingTable.AddRoute (rt);
   //RoutingTableEntry rt1;
   // m_routingTable.LookupValidRoute(iface.GetBroadcast (), rt1);
@@ -777,7 +813,8 @@ RoutingProtocol::NotifyAddAddress (uint32_t i, Ipv4InterfaceAddress address)
           rt.PathInsert (/*device=*/ dev, /*nextHop=*/ iface.GetBroadcast (), /*hop=*/ 1, 
                          /*expireTime=*/ Simulator::GetMaximumSimulationTime (), 
                          /*lastHop=*/ iface.GetBroadcast (), 
-                         /*iface=*/ iface);
+                         /*iface=*/ iface,
+                         /*rrepR1=*/ 0, /*rrepR2=*/ 0, /*hash=*/ 0);
           m_routingTable.AddRoute (rt);
         }
     }
@@ -839,7 +876,8 @@ RoutingProtocol::NotifyRemoveAddress (uint32_t i, Ipv4InterfaceAddress address)
           rt.PathInsert (/*device=*/ dev, /*nextHop=*/ iface.GetBroadcast (), /*hop=*/ 1, 
                          /*expireTime=*/ Simulator::GetMaximumSimulationTime (), 
                          /*lastHop=*/ iface.GetBroadcast (), 
-                         /*iface=*/ iface);
+                         /*iface=*/ iface,
+                         /*rrepR1=*/ 0, /*rrepR2=*/ 0, /*hash=*/ 0);
           m_routingTable.AddRoute (rt);
         }
       if (m_socketAddresses.empty ())
@@ -984,6 +1022,19 @@ RoutingProtocol::SendRequest (Ipv4Address dst)
   m_requestId++;
   rreqHeader.SetId (m_requestId);
   rreqHeader.SetHopCount (0);
+
+  // Set PUF-related fields (m_0)
+  uint32_t challenge1 = GenerateRandomChallenge();
+  uint32_t challenge2 = GenerateRandomChallenge();
+  uint32_t response1 = CalculatePufResponse(challenge1);
+  uint32_t response2 = CalculatePufResponse(challenge2);
+  
+  // 设置两个响应值到RREQ包头
+  rreqHeader.SetRreqR1(response1);  // Set R_1^RREQ
+  rreqHeader.SetRreqR2(response2);  // Set R_2^RREQ
+
+  NS_LOG_UNCOND("RREQ SENT FROM ORIGIN WITH TTL = " << ttl << " at time = " << Simulator::Now().GetSeconds());
+
   // Send RREQ as subnet directed broadcast from each interface used by aomdv
   for (std::map<Ptr<Socket>, Ipv4InterfaceAddress>::const_iterator j =
          m_socketAddresses.begin (); j != m_socketAddresses.end (); ++j)
@@ -1161,10 +1212,22 @@ RoutingProtocol::UpdateRouteToNeighbor (Ipv4Address sender, Ipv4Address receiver
       Ptr<NetDevice> dev = m_ipv4->GetNetDevice (m_ipv4->GetInterfaceForAddress (receiver));
       RoutingTableEntry newEntry (/*dst=*/ sender, /*validSeqNo=*/ false, /*seqno=*/ 0, 
                                   /*lifeTime=*/ m_activeRouteTimeout);
+      
+      // 生成 PUF 相关字段 rreqR1 和 rreqR2
+      uint32_t rreqR1 = GenerateRandomChallenge();
+      uint32_t rreqR2 = GenerateRandomChallenge();
+      
+      // 计算 hash 值
+      uint32_t hash = rreqR1 ^ rreqR2;
+      
+      // 插入路径条目
       newEntry.PathInsert (/*device=*/ dev, /*nextHop=*/ sender, /*hop=*/ 1, 
                            /*expireTime=*/ m_activeRouteTimeout, 
                            /*lastHop=*/ sender, 
-                           /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));//wrong
+                           /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),
+                           /*rreqR1=*/ rreqR1, 
+                           /*rreqR2=*/ rreqR2, 
+                           /*hash=*/ hash);
       m_routingTable.AddRoute (newEntry);
     }
   else
@@ -1188,14 +1251,25 @@ RoutingProtocol::UpdateRouteToNeighbor (Ipv4Address sender, Ipv4Address receiver
         {
           RoutingTableEntry newEntry (/*dst=*/ sender, /*validSeqNo=*/ false, /*seqno=*/ 0, 
                                       /*lifeTime=*/ std::max (m_activeRouteTimeout, toNeighbor.GetLifeTime ()));
+                                      
+          // 生成新的 PUF 相关字段 rreqR1 和 rreqR2
+          uint32_t rreqR1 = GenerateRandomChallenge();
+          uint32_t rreqR2 = GenerateRandomChallenge();
+          
+          // 计算 hash 值
+          uint32_t hash = rreqR1 ^ rreqR2;
+          
+          // 插入路径条目
           newEntry.PathInsert (/*device=*/ dev, /*nextHop=*/ sender, /*hop=*/ 1, 
                                /*expireTime=*/ std::max (m_activeRouteTimeout, toNeighbor.GetLifeTime ()), 
                                /*lastHop=*/ sender, 
-                               /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));//wrong
+                               /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),
+                               /*rreqR1=*/ rreqR1, 
+                               /*rreqR2=*/ rreqR2, 
+                               /*hash=*/ hash);
           m_routingTable.Update (newEntry);
         }
     }
-
 }
 
 void
@@ -1243,6 +1317,24 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
   // Increment RREQ hop count
   uint8_t hop = rreqHeader.GetHopCount () + 1;
 
+  // 更新认证相关的字段 `R_1^RREQ` 和 `R_2^RREQ`，并根据需要验证 PUF 认证
+  uint32_t newRreqR1 = CalculatePufResponse(rreqHeader.GetRreqR1());
+  uint32_t newRreqR2 = CalculatePufResponse(rreqHeader.GetRreqR2());
+  rreqHeader.SetRreqR1(newRreqR1);
+  rreqHeader.SetRreqR2(newRreqR2);
+
+  // 提取 RREQ 中的 PUF 响应值
+  uint32_t receivedRreqR1 = rreqHeader.GetRreqR1();
+  uint32_t receivedRreqR2 = rreqHeader.GetRreqR2();
+
+
+  // 验证 PUF 认证
+  if (newRreqR1 == receivedRreqR1 && newRreqR2 == receivedRreqR2) {
+      NS_LOG_UNCOND("Node " << m_ipv4->GetObject<Node>()->GetId() << " received PUF-authenticated RREQ from node " << src);
+  } else {
+      NS_LOG_UNCOND("Node " << m_ipv4->GetObject<Node>()->GetId() << " failed PUF authentication for RREQ from node " << src);
+      return;
+  }
   /*
    *  When the reverse route is created or updated, the following actions on the route are also carried out:
    *  1. the Originator Sequence Number from the RREQ is compared to the corresponding destination sequence number
@@ -1274,7 +1366,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
           dev, src, rreqHeader.GetHopCount () + 1,
           Time ((2 * m_netTraversalTime - 2 * hop * m_nodeTraversalTime)),
           rreqHeader.GetFirstHop (),
-          m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+          m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),rreqHeader.GetRreqR1(),rreqHeader.GetRreqR2(),0);
       toOrigin.SetLastHopCount (toOrigin.PathGetMaxHopCount ());
     }
   else if ((int32_t (rreqHeader.GetOriginSeqno ()) == int32_t (toOrigin.GetSeqNo ())) 
@@ -1302,7 +1394,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
                     dev, src, rreqHeader.GetHopCount () + 1,
                     Time ((2 * m_netTraversalTime - 2 * hop * m_nodeTraversalTime)),
                     rreqHeader.GetFirstHop (),
-                    m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                    m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),rreqHeader.GetRreqR1(),rreqHeader.GetRreqR2(),0);
                 toOrigin.SetLastHopCount (toOrigin.PathGetMaxHopCount ());
               }
             if (((rreqHeader.GetHopCount () + 1) - toOrigin.PathGetMinHopCount ()) >
@@ -1319,7 +1411,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
             return;
           }
       }
-    else //fully chanes from return;
+    else
       {
         return;
       }
@@ -1338,7 +1430,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
                                   /*timeLife=*/ m_activeRouteTimeout);
       newEntry.PathInsert (dev, src, 1, 
                            m_activeRouteTimeout, src, 
-                           m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                           m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),0,0,0);
       m_routingTable.AddRoute (newEntry);
     }
   else
@@ -1351,7 +1443,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
       if(!p){
         toNeighbor.PathInsert (dev, src, 1, 
                            m_activeRouteTimeout, src, 
-                           m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                           m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),0,0,0);
       }
       else {
         p->SetOutputDevice (m_ipv4->GetNetDevice (m_ipv4->GetInterfaceForAddress (receiver)));
@@ -1388,7 +1480,7 @@ RoutingProtocol::RecvRequest (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address s
       /*
        * Drop RREQ, This node RREP wil make a loop.
        */
-      if (toDst.PathFind ()->GetNextHop () == src || toDst.PathFind ()->GetNextHop () == toOrigin.PathFind ()->GetNextHop())//toDst.PathFind ()->GetNextHop ()
+      if (toDst.PathFind ()->GetNextHop () == src || toDst.PathFind ()->GetNextHop () == toOrigin.PathFind ()->GetNextHop())
         {
           return;
         }
@@ -1532,10 +1624,27 @@ RoutingProtocol::SendReply (RreqHeader const & rreqHeader, RoutingTableEntry & t
   if ( m_seqNo <= rreqHeader.GetDstSeqno())
     m_seqNo = rreqHeader.GetDstSeqno()+1;
   if (m_seqNo%2) m_seqNo++;
-  RrepHeader rrepHeader ( /*prefixSize=*/ 0, /*hops=*/ 0, /*dst=*/ rreqHeader.GetDst (),
-                          /*dstSeqNo=*/ m_seqNo, /*origin=*/ toOrigin.GetDestination (), 
-                          /*requestId=*/ rreqHeader.GetId (), /*firstHop=*/firstHop,
-                          /*lifeTime=*/ m_myRouteTimeout);
+
+  // 生成两个响应 R_1 和 R_2 作为 RREP 的 PUF 验证字段
+  uint32_t rrepR1 = CalculatePufResponse(rreqHeader.GetRreqR1());
+  uint32_t rrepR2 = CalculatePufResponse(rreqHeader.GetRreqR2());
+
+  // 计算 Hash 值
+  uint32_t hash = rrepR1 ^ rrepR2;
+
+  RrepHeader rrepHeader( 
+    /*prefixSize=*/ 0,
+    /*hops=*/ 0, 
+    /*dst=*/ rreqHeader.GetDst(),
+    /*dstSeqNo=*/ m_seqNo,
+    /*origin=*/ toOrigin.GetDestination(), 
+    /*requestId=*/ rreqHeader.GetId (),
+    /*firstHop=*/ firstHop,
+    /*lifeTime=*/ m_myRouteTimeout,
+    /*rrepR1=*/ rrepR1,
+    /*rrepR2=*/ rrepR2,
+    /*hash=*/ hash
+  );
   Ptr<Packet> packet = Create<Packet> ();
   SocketIpTtlTag tag;
   tag.SetTtl (toOrigin.PathGetMaxHopCount ()+1);
@@ -1555,9 +1664,31 @@ RoutingProtocol::SendReplyByIntermediateNode (RoutingTableEntry & toDst, Routing
                                               Ipv4Address firstHop, uint32_t requestId)
 {
   NS_LOG_FUNCTION (this);
-  RrepHeader rrepHeader (/*prefix size=*/ 0, /*hops=*/ toDst.PathFind ()->GetHopCount (), /*dst=*/ toDst.GetDestination (), 
-                         /*dst seqno=*/ toDst.GetSeqNo (), /*origin=*/ toOrigin.GetDestination (),
-                         /*requestId=*/requestId, /*firstHop=*/ firstHop, /*lifetime=*/ toDst.GetLifeTime ());
+    
+    // 生成 PUF 挑战和响应
+    uint32_t challenge1 = GenerateRandomChallenge();
+    uint32_t challenge2 = GenerateRandomChallenge();
+    uint32_t response1 = CalculatePufResponse(challenge1);
+    uint32_t response2 = CalculatePufResponse(challenge2);
+
+    // 计算 alpha 验证值
+    uint32_t alpha = CalculateAlpha(response1, response2);
+    StorePufValues(challenge1, challenge2, alpha);
+
+    // 构建 RREP 报头，并添加 PUF 响应和 Hash 值
+    uint32_t hash = response1 ^ response2; // 简单的 Hash，实际应用中可以更复杂
+    RrepHeader rrepHeader(
+        /*prefix size=*/ 0, 
+        /*hops=*/ toDst.PathFind()->GetHopCount(), 
+        /*dst=*/ toDst.GetDestination(),
+        /*dst seqno=*/ toDst.GetSeqNo(), 
+        /*origin=*/ toOrigin.GetDestination(),
+        /*requestId=*/ requestId, 
+        /*firstHop=*/ firstHop, 
+        /*lifetime=*/ toDst.GetLifeTime(), 
+        response1, response2, hash
+    );
+
 
   /* If the node we received a RREQ for is a neighbor we are
    * probably facing a unidirectional link... Better request a RREP-ack
@@ -1590,9 +1721,17 @@ RoutingProtocol::SendReplyByIntermediateNode (RoutingTableEntry & toDst, Routing
   // Generating gratuitous RREPs
   if (gratRep)
     {
-      RrepHeader gratRepHeader (/*prefix size=*/ 0, /*hops=*/ toOrigin.PathFind ()->GetHopCount (), /*dst=*/ toOrigin.GetDestination (),
-                                /*dst seqno=*/ toOrigin.GetSeqNo (), /*origin=*/ toDst.GetDestination (), /*requestId=*/
-                                requestId, /*firstHop=*/ firstHop, /*lifetime=*/ toOrigin.GetLifeTime ());
+      RrepHeader gratRepHeader(
+        /*prefix size=*/ 0,
+        /*hops=*/ toOrigin.PathFind ()->GetHopCount (),
+        /*dst=*/ toOrigin.GetDestination (),
+        /*dst seqno=*/ toOrigin.GetSeqNo (),
+        /*origin=*/ toDst.GetDestination (),
+        /*requestId=*/ requestId,
+        /*firstHop=*/ firstHop,
+        /*lifetime=*/ toOrigin.GetLifeTime(),
+        response1, response2, hash
+      );
       Ptr<Packet> packetToDst = Create<Packet> ();
       SocketIpTtlTag gratTag;
       gratTag.SetTtl (toDst.GetAdvertisedHopCount ());
@@ -1611,19 +1750,41 @@ void
 RoutingProtocol::SendReplyAck (Ipv4Address neighbor)
 {
   NS_LOG_FUNCTION (this << " to " << neighbor);
-  RrepAckHeader h;
-  TypeHeader typeHeader (AOMDVTYPE_RREP_ACK);
+  
+  // 生成 PUF 挑战响应
+  uint32_t challenge1 = GenerateRandomChallenge();
+  uint32_t challenge2 = GenerateRandomChallenge();
+  uint32_t response1 = CalculatePufResponse(challenge1);
+  uint32_t response2 = CalculatePufResponse(challenge2);
+
+  // 计算简单哈希值，用于验证
+  uint32_t hash = response1 ^ response2;
+
+  // 构建 RREP-ACK 报头并设置 PUF 字段
+  RrepAckHeader ackHeader;
+  ackHeader.SetAckR1(response1);
+  ackHeader.SetAckR2(response2);
+  ackHeader.SetHash(hash);
+
   Ptr<Packet> packet = Create<Packet> ();
   SocketIpTtlTag tag;
   tag.SetTtl (1);
   packet->AddPacketTag (tag);
-  packet->AddHeader (h);
+  packet->AddHeader(ackHeader);
+  TypeHeader typeHeader(AOMDVTYPE_RREP_ACK);
   packet->AddHeader (typeHeader);
   RoutingTableEntry toNeighbor;
-  m_routingTable.LookupRoute (neighbor, toNeighbor);
-  Ptr<Socket> socket = FindSocketWithInterfaceAddress (toNeighbor.PathFind ()->GetInterface ());
-  NS_ASSERT (socket);
-  socket->SendTo (packet, 0, InetSocketAddress (neighbor, AOMDV_PORT));
+    if (m_routingTable.LookupRoute (neighbor, toNeighbor))
+    {
+        Ptr<Socket> socket = FindSocketWithInterfaceAddress (toNeighbor.PathFind ()->GetInterface ());
+        NS_ASSERT (socket);
+        // 发送数据包到邻居节点
+        socket->SendTo(packet, 0, InetSocketAddress (neighbor, AOMDV_PORT));
+    }
+    else
+    {
+        NS_LOG_WARN("No route to neighbor " << neighbor << ", unable to send RREP-ACK.");
+    }
 }
 
 void
@@ -1638,8 +1799,19 @@ RoutingProtocol::RecvReply (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address sen
   NS_LOG_LOGIC ("RREP destination " << dst << " RREP origin " << rrepHeader.GetOrigin ());
   if (IsMyOwnAddress (dst))
     {
-
       return;
+    }
+
+    // 初始化 PUF 相关计算
+    uint32_t receivedRrepR1 = rrepHeader.GetRrepR1();
+    uint32_t receivedRrepR2 = rrepHeader.GetRrepR2();
+    uint32_t calculatedHash = receivedRrepR1 ^ receivedRrepR2; // 使用异或操作计算哈希
+
+    // 验证哈希
+    if (calculatedHash != rrepHeader.GetHash())
+    {
+        NS_LOG_WARN("Hash verification failed for RREP from " << sender << ". Dropping packet.");
+        return;
     }
   if (rrepHeader.GetHopCount () == 0) 
     {
@@ -1695,7 +1867,7 @@ RoutingProtocol::RecvReply (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address sen
         /* Insert forward path to RREQ destination. */
         forwardPath = toDst.PathInsert (dev, sender, hop, 
                                         Simulator::Now() + rrepHeader.GetLifeTime (), rrepHeader.GetFirstHop (),
-                                        m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                                        m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),rrepHeader.GetRrepR1(),rrepHeader.GetRrepR2(),rrepHeader.GetHash ());
         toDst.SetLastHopCount (toDst.PathGetMaxHopCount ());
         
       }
@@ -1721,14 +1893,13 @@ RoutingProtocol::RecvReply (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address sen
             forwardPath = toDst.PathInsert (dev, sender, hop, 
                                             Simulator::Now() + rrepHeader.GetLifeTime (), 
                                             rrepHeader.GetFirstHop (),
-                                            m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                                            m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),rrepHeader.GetRrepR1(),rrepHeader.GetRrepR2(),rrepHeader.GetHash ());
             toDst.SetLastHopCount (toDst.PathGetMaxHopCount ());
           }
         else
           {
             return;
           }
-      
       }
     else          
       {
@@ -1736,7 +1907,6 @@ RoutingProtocol::RecvReply (Ptr<Packet> p, Ipv4Address receiver, Ipv4Address sen
       }
     m_routingTable.Update(toDst);
 
-    
   m_routingTable.LookupRoute (dst, toDst);
   // Acknowledge receipt of the RREP by sending a RREP-ACK message back
   if (rrepHeader.GetAckRequired ())
@@ -1881,7 +2051,7 @@ RoutingProtocol::ProcessHello (RrepHeader const & rrepHeader, Ipv4Address receiv
       newEntry.PathInsert (/*device=*/ dev, /*nextHop=*/ rrepHeader.GetDst (), /*hop=*/ 1, 
                            /*expireTime=*/ rrepHeader.GetLifeTime (), 
                            /*lastHop=*/ rrepHeader.GetFirstHop (), 
-                           /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0));
+                           /*iface=*/ m_ipv4->GetAddress (m_ipv4->GetInterfaceForAddress (receiver), 0),0,0,0);
       m_routingTable.AddRoute (newEntry);
     }
   else

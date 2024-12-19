@@ -41,9 +41,11 @@ namespace aomdv
 {
 
 RoutingTableEntry::Path::Path (Ptr<NetDevice> dev, Ipv4Address dst, Ipv4Address nextHop, uint16_t hopCount, 
-                               Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface) :
+                               Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface,
+                               uint32_t rrepR1, uint32_t rrepR2, uint32_t hash) :
   m_hopCount (hopCount), m_expire (expireTime + Simulator::Now ()), m_lastHop (lastHop), 
-  m_iface (iface), m_ts(Simulator::Now ()), m_pathError(false)
+  m_iface (iface), m_ts(Simulator::Now ()), m_pathError(false),
+  m_rrepR1(rrepR1), m_rrepR2(rrepR2), m_hash(hash)
 {
   m_ipv4Route = Create<Ipv4Route> ();
   m_ipv4Route->SetDestination (dst);
@@ -63,7 +65,8 @@ RoutingTableEntry::Path::Print (Ptr<OutputStreamWrapper> stream) const
   *os << std::setiosflags (std::ios::fixed) << 
   std::setiosflags (std::ios::left) << std::setprecision (2) <<
   std::setw (14) << (m_expire - Simulator::Now ()).GetSeconds ();
-  *os << "\t" << m_hopCount << "\n";
+  *os << "\t" << m_hopCount;
+  *os << "\tR1: " << m_rrepR1 << "\tR2: " << m_rrepR2 << "\tHash: " << m_hash << "\n";
 }
 
   /*
@@ -99,9 +102,11 @@ RoutingTableEntry::PrintPaths()
 
 struct RoutingTableEntry::Path* 
 RoutingTableEntry::PathInsert (Ptr<NetDevice> dev, Ipv4Address nextHop, uint16_t hopCount, 
-                               Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface)
+                               Time expireTime, Ipv4Address lastHop, Ipv4InterfaceAddress iface, 
+                               uint32_t rrepR1, uint32_t rrepR2, uint32_t hash)
 {
-  Path *p = new Path(dev, m_dst, nextHop, hopCount, expireTime, lastHop, iface);
+  Path *p = new Path(dev, m_dst, nextHop, hopCount, expireTime, lastHop, iface,
+                     rrepR1, rrepR2, hash);
   m_pathList.push_back (*p);
   m_numPaths += 1;     //TODO
   //RoutingTableEntry::Path *p = (struct RoutingTableEntry::Path*)malloc(sizeof(struct RoutingTableEntry::Path));
@@ -116,7 +121,6 @@ RoutingTableEntry::PathLookup (Ipv4Address id)
     {
       if (i->m_ipv4Route->GetGateway () == id)
         {
-          //NS_LOG_UNCOND ("Path " << id << " found");
           Path *path = &(*i);
           return path;
         }
@@ -124,7 +128,6 @@ RoutingTableEntry::PathLookup (Ipv4Address id)
   NS_LOG_LOGIC ("Path " << id << " not found");
   return NULL;
 }
-
 
 struct RoutingTableEntry::Path* 
 RoutingTableEntry::PathLookupDisjoint (Ipv4Address nh, Ipv4Address lh) 
@@ -176,7 +179,6 @@ RoutingTableEntry::PathLookupLastHop (Ipv4Address id)
   return NULL;
 }
 
-//TODO
 void 
 RoutingTableEntry::PathDelete (Ipv4Address id)
 {
@@ -187,7 +189,8 @@ RoutingTableEntry::PathDelete (Ipv4Address id)
     {
       NS_LOG_LOGIC ("Path " << id << " found");
       m_pathList.erase (i);
-      m_numPaths -= 1;   //TODO
+      m_numPaths -= 1;
+      break;
     }
   }
 }
@@ -331,7 +334,7 @@ void
 RoutingTableEntry::PathPurge (void)
 {
   Time now = Simulator::Now ();
-  return;//todo changed but BAD
+  return;
   bool cond;
   do
     {

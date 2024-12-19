@@ -58,7 +58,7 @@ namespace aomdv
 /**
  * \ingroup aomdv
  * 
- * \brief AOMDV routing protocol
+ * \brief AOMDV routing protocol with PUF-based authentication
  */
 class RoutingProtocol : public Ipv4RoutingProtocol
 {
@@ -150,6 +150,11 @@ private:
   bool m_enableBroadcast;              ///< Indicates whether a a broadcast data packets forwarding enable
   //\}
 
+  // Add PUF fields for the protocol messages
+  uint32_t m_pufChallengeRREQ;      ///< PUF challenge for RREQ
+  uint32_t m_pufResponseRREP;       ///< PUF response for RREP
+  uint32_t m_pufAlphaRREP_ACK;      ///< Calculated alpha for RREP-ACK
+
   /// IP protocol
   Ptr<Ipv4> m_ipv4;
   /// Raw unicast socket per each IP interface, map socket -> iface address (IP + mask)
@@ -214,6 +219,13 @@ private:
   /// Check that packet is send from own interface
   bool IsMyOwnAddress (Ipv4Address src);
   /// Find unicast socket with local interface address iface
+
+  // Added PUF-related helper functions
+  uint32_t GenerateRandomChallenge();   ///< Generate random challenge for PUF
+  uint32_t CalculatePufResponse(uint32_t challenge);  ///< Calculate the PUF response based on a challenge
+  uint32_t CalculateAlpha(uint32_t response1, uint32_t response2); ///< Calculate alpha for RREP-ACK based on two PUF responses
+  void StorePufValues(uint32_t x1, uint32_t x2, uint32_t alpha);  ///< Store the PUF challenge and response values
+
   Ptr<Socket> FindSocketWithInterfaceAddress (Ipv4InterfaceAddress iface) const;
   /// Find subnet directed broadcast socket with local interface address iface
   Ptr<Socket> FindSubnetBroadcastSocketWithInterfaceAddress (Ipv4InterfaceAddress iface) const;
@@ -251,8 +263,7 @@ private:
    * \param toOrigin routing table entry to originator
    * \param gratRep indicates whether a gratuitous RREP should be unicast to destination
    */
-  void SendReplyByIntermediateNode (RoutingTableEntry & toDst, RoutingTableEntry & toOrigin, bool gratRep, Time expire,
-                                    Ipv4Address firstHop, uint32_t requestId);
+  void SendReplyByIntermediateNode (RoutingTableEntry & toDst, RoutingTableEntry & toOrigin, bool gratRep, Time expire, Ipv4Address firstHop, uint32_t requestId);
   /// Send RREP_ACK
   void SendReplyAck (Ipv4Address neighbor);
   /// Initiate RERR
@@ -292,6 +303,7 @@ private:
   /// Provides uniform random variables.
   Ptr<UniformRandomVariable> m_uniformRandomVariable;  
   /// Keep track of the last bcast time
+  std::vector<std::tuple<uint32_t, uint32_t, uint32_t>> m_pufChallengesAndAlpha;
   Time m_lastBcastTime;
   /// AOMDV Code
   int32_t m_MaxPaths;

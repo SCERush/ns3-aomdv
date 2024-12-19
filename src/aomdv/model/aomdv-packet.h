@@ -106,7 +106,8 @@ public:
   RreqHeader (uint8_t flags = 0, uint8_t reserved = 0, uint8_t hopCount = 0,
               uint32_t requestID = 0, Ipv4Address dst = Ipv4Address (),
               uint32_t dstSeqNo = 0, Ipv4Address origin = Ipv4Address (),
-              uint32_t originSeqNo = 0, Ipv4Address firstHop = Ipv4Address());
+              uint32_t originSeqNo = 0, Ipv4Address firstHop = Ipv4Address(),
+              uint32_t rreqR1 = 0, uint32_t rreqR2 = 0);
 
   ///\name Header serialization/deserialization
   //\{
@@ -134,6 +135,12 @@ public:
   uint32_t GetOriginSeqno () const { return m_originSeqNo; }
   void SetFirstHop (Ipv4Address a) { m_firstHop = a; }
   Ipv4Address GetFirstHop () const { return m_firstHop; }
+
+  // PUF-related fields
+  void SetRreqR1 (uint32_t r1) { m_rreqR1 = r1; }
+  uint32_t GetRreqR1 () const { return m_rreqR1; }
+  void SetRreqR2 (uint32_t r2) { m_rreqR2 = r2; }
+  uint32_t GetRreqR2 () const { return m_rreqR2; }
   //\}
 
   ///\name Flags
@@ -144,6 +151,8 @@ public:
   bool GetDestinationOnly () const;
   void SetUnknownSeqno (bool f);
   bool GetUnknownSeqno () const;
+  void SetRReq (bool f);
+  bool GetRReq () const;
   //\}
 
   bool operator== (RreqHeader const & o) const;
@@ -157,6 +166,8 @@ private:
   Ipv4Address    m_origin;         ///< Originator IP Address
   uint32_t       m_originSeqNo;    ///< Source Sequence Number
   Ipv4Address    m_firstHop;
+  uint32_t       m_rreqR1;         ///< PUF Challenge R1
+  uint32_t       m_rreqR2;         ///< PUF Challenge R2
 };
 
 std::ostream & operator<< (std::ostream & os, RreqHeader const &);
@@ -187,7 +198,8 @@ public:
   RrepHeader (uint8_t prefixSize = 0, uint8_t hopCount = 0, Ipv4Address dst =
                 Ipv4Address (), uint32_t dstSeqNo = 0, Ipv4Address origin =
                 Ipv4Address (), uint32_t requestID = 0,  Ipv4Address firstHop =
-                Ipv4Address (), Time lifetime = MilliSeconds (0));
+                Ipv4Address (), Time lifetime = MilliSeconds (0),
+                uint32_t rrepR1 = 0, uint32_t rrepR2 = 0, uint32_t hash = 0);
   ///\name Header serialization/deserialization
   //\{
   static TypeId GetTypeId ();
@@ -214,6 +226,26 @@ public:
   Ipv4Address GetFirstHop () const { return m_firstHop; }
   void SetLifeTime (Time t);
   Time GetLifeTime () const;
+  // PUF-related fields
+  void SetRrepR1 (uint32_t r1) { m_rrepR1 = r1; }
+  uint32_t GetRrepR1 () const { return m_rrepR1; }
+  void SetRrepR2 (uint32_t r2) { m_rrepR2 = r2; }
+  uint32_t GetRrepR2 () const { return m_rrepR2; }
+  void SetHash (uint32_t hash) { m_hash = hash; }
+  uint32_t GetHash () const { return m_hash; }
+
+
+   ///\name Flags
+  //\{
+  void SetGratiousRrep (bool f);
+  bool GetGratiousRrep () const;
+  void SetDestinationOnly (bool f);
+  bool GetDestinationOnly () const;
+  void SetUnknownSeqno (bool f);
+  bool GetUnknownSeqno () const;
+  void SetRReq (bool f);
+  bool GetRReq () const;
+  //\}
   //\}
 
   ///\name Flags
@@ -238,6 +270,9 @@ private:
   uint32_t      m_requestID;
   Ipv4Address   m_firstHop;
   uint32_t      m_lifeTime;         ///< Lifetime (in milliseconds)
+  uint32_t      m_rrepR1;           ///< PUF Response R1
+  uint32_t      m_rrepR2;           ///< PUF Response R2
+  uint32_t      m_hash;             ///< Hash for integrity
 };
 
 std::ostream & operator<< (std::ostream & os, RrepHeader const &);
@@ -257,7 +292,7 @@ class RrepAckHeader : public Header
 {
 public:
   /// c-tor
-  RrepAckHeader ();
+  RrepAckHeader (uint32_t ackR1 = 0, uint32_t ackR2 = 0, uint32_t hash = 0);
 
   ///\name Header serialization/deserialization
   //\{
@@ -269,9 +304,20 @@ public:
   void Print (std::ostream &os) const;
   //\}
 
+  // PUF-related fields
+  void SetAckR1 (uint32_t r1) { m_ackR1 = r1; }
+  uint32_t GetAckR1 () const { return m_ackR1; }
+  void SetAckR2 (uint32_t r2) { m_ackR2 = r2; }
+  uint32_t GetAckR2 () const { return m_ackR2; }
+  void SetHash (uint32_t hash) { m_hash = hash; }
+  uint32_t GetHash () const { return m_hash; }
+
   bool operator== (RrepAckHeader const & o) const;
 private:
-  uint8_t       m_reserved;
+  uint32_t       m_ackR1;           ///< PUF Response R1 for ACK
+  uint32_t       m_ackR2;           ///< PUF Response R2 for ACK
+  uint32_t       m_hash;            ///< Hash for integrity
+
 };
 std::ostream & operator<< (std::ostream & os, RrepAckHeader const &);
 

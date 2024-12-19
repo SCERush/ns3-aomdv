@@ -25,6 +25,7 @@
  * Authors: Elena Buchatskaia <borovkovaes@iitp.ru>
  *          Pavel Boyko <boyko@iitp.ru>
  */
+
 #include "aomdv-packet.h"
 #include "ns3/address-utils.h"
 #include "ns3/packet.h"
@@ -33,6 +34,10 @@ namespace ns3
 {
 namespace aomdv
 {
+
+//-----------------------------------------------------------------------------
+// TypeHeader
+//-----------------------------------------------------------------------------
 
 NS_OBJECT_ENSURE_REGISTERED (TypeHeader);
 
@@ -140,9 +145,10 @@ operator<< (std::ostream & os, TypeHeader const & h)
 // RREQ
 //-----------------------------------------------------------------------------
 RreqHeader::RreqHeader (uint8_t flags, uint8_t reserved, uint8_t hopCount, uint32_t requestID, Ipv4Address dst,
-                        uint32_t dstSeqNo, Ipv4Address origin, uint32_t originSeqNo, Ipv4Address firstHop) :
+                        uint32_t dstSeqNo, Ipv4Address origin, uint32_t originSeqNo, Ipv4Address firstHop,
+                        uint32_t rreqR1, uint32_t rreqR2) :
   m_flags (flags), m_reserved (reserved), m_hopCount (hopCount), m_requestID (requestID), m_dst (dst),
-  m_dstSeqNo (dstSeqNo), m_origin (origin),  m_originSeqNo (originSeqNo), m_firstHop (firstHop)
+  m_dstSeqNo (dstSeqNo), m_origin (origin),  m_originSeqNo (originSeqNo), m_firstHop (firstHop), m_rreqR1 (rreqR1), m_rreqR2 (rreqR2)
 {
 }
 
@@ -167,7 +173,7 @@ RreqHeader::GetInstanceTypeId () const
 uint32_t
 RreqHeader::GetSerializedSize () const
 {
-  return 27;                            //Read the source code
+  return 27 + 8;                            //Read the source code
 }
 
 void
@@ -182,6 +188,9 @@ RreqHeader::Serialize (Buffer::Iterator i) const
   WriteTo (i, m_origin);
   i.WriteHtonU32 (m_originSeqNo);
   WriteTo (i, m_firstHop);
+  // 新增的PUF字段
+  i.WriteHtonU32 (m_rreqR1);
+  i.WriteHtonU32 (m_rreqR2);
 }
 
 uint32_t
@@ -197,6 +206,9 @@ RreqHeader::Deserialize (Buffer::Iterator start)
   ReadFrom (i, m_origin);
   m_originSeqNo = i.ReadNtohU32 ();
   ReadFrom (i, m_firstHop);
+  // 读取新增的PUF字段
+  m_rreqR1 = i.ReadNtohU32 ();
+  m_rreqR2 = i.ReadNtohU32 ();
 
   uint32_t dist = i.GetDistanceFrom (start);
   NS_ASSERT (dist == GetSerializedSize ());
@@ -211,7 +223,8 @@ RreqHeader::Print (std::ostream &os) const
      << m_origin << " sequence number " << m_originSeqNo << " first hop " << m_firstHop
      << " flags:" << " Gratuitous RREP " << (*this).GetGratiousRrep ()
      << " Destination only " << (*this).GetDestinationOnly ()
-     << " Unknown sequence number " << (*this).GetUnknownSeqno ();
+     << " Unknown sequence number " << (*this).GetUnknownSeqno ()
+     << " PUF responses: R1 = " << m_rreqR1 << ", R2 = " << m_rreqR2;
 }
 
 std::ostream &
@@ -280,9 +293,11 @@ RreqHeader::operator== (RreqHeader const & o) const
 //-----------------------------------------------------------------------------
 
 RrepHeader::RrepHeader (uint8_t prefixSize, uint8_t hopCount, Ipv4Address dst,
-                        uint32_t dstSeqNo, Ipv4Address origin, uint32_t requestID, Ipv4Address firstHop, Time lifeTime) :
+                        uint32_t dstSeqNo, Ipv4Address origin, uint32_t requestID, Ipv4Address firstHop, Time lifeTime,
+                        uint32_t rrepR1, uint32_t rrepR2, uint32_t hash) :
   m_flags (0), m_prefixSize (prefixSize), m_hopCount (hopCount),
-  m_dst (dst), m_dstSeqNo (dstSeqNo), m_origin (origin), m_requestID (requestID), m_firstHop (firstHop)
+  m_dst (dst), m_dstSeqNo (dstSeqNo), m_origin (origin), m_requestID (requestID), m_firstHop (firstHop),
+  m_rrepR1 (rrepR1), m_rrepR2 (rrepR2), m_hash (hash)
 {
   m_lifeTime = uint32_t (lifeTime.GetMilliSeconds ());
 }
@@ -308,7 +323,7 @@ RrepHeader::GetInstanceTypeId () const
 uint32_t
 RrepHeader::GetSerializedSize () const
 {
-  return 27;
+  return 27 + 12;
 }
 
 void
@@ -323,6 +338,10 @@ RrepHeader::Serialize (Buffer::Iterator i) const
   i.WriteHtonU32 (m_requestID);
   WriteTo (i, m_firstHop);
   i.WriteHtonU32 (m_lifeTime);
+  // 序列化 PUF 字段和哈希字段
+  i.WriteHtonU32 (m_rrepR1);
+  i.WriteHtonU32 (m_rrepR2);
+  i.WriteHtonU32 (m_hash);
 }
 
 uint32_t
@@ -339,6 +358,10 @@ RrepHeader::Deserialize (Buffer::Iterator start)
   m_requestID = i.ReadNtohU32 ();
   ReadFrom (i, m_firstHop);
   m_lifeTime = i.ReadNtohU32 ();
+  // 反序列化 PUF 字段和哈希字段
+  m_rrepR1 = i.ReadNtohU32 ();
+  m_rrepR2 = i.ReadNtohU32 ();
+  m_hash = i.ReadNtohU32 ();
 
   uint32_t dist = i.GetDistanceFrom (start);
   NS_ASSERT (dist == GetSerializedSize ());
@@ -348,13 +371,10 @@ RrepHeader::Deserialize (Buffer::Iterator start)
 void
 RrepHeader::Print (std::ostream &os) const
 {
-  os << "destination: ipv4 " << m_dst << " sequence number " << m_dstSeqNo << " Request ID " << m_requestID << " first hop " << m_firstHop;
-  if (m_prefixSize != 0)
-    {
-      os << " prefix size " << m_prefixSize;
-    }
-  os << " source ipv4 " << m_origin << " lifetime " << m_lifeTime
-     << " acknowledgment required flag " << (*this).GetAckRequired ();
+  os << "destination: ipv4 " << m_dst << " sequence number " << m_dstSeqNo << " Request ID " << m_requestID 
+     << " first hop " << m_firstHop << " lifetime " << m_lifeTime
+     << " PUF responses: R1 = " << m_rrepR1 << ", R2 = " << m_rrepR2
+     << " Hash = " << m_hash;
 }
 
 void
@@ -430,8 +450,8 @@ operator<< (std::ostream & os, RrepHeader const & h)
 // RREP-ACK
 //-----------------------------------------------------------------------------
 
-RrepAckHeader::RrepAckHeader () :
-  m_reserved (0)
+RrepAckHeader::RrepAckHeader (uint32_t ackR1, uint32_t ackR2, uint32_t hash) :
+m_ackR1 (ackR1), m_ackR2 (ackR2), m_hash (hash)
 {
 }
 
@@ -456,20 +476,25 @@ RrepAckHeader::GetInstanceTypeId () const
 uint32_t
 RrepAckHeader::GetSerializedSize () const
 {
-  return 1;
+  return 12;
 }
 
 void
 RrepAckHeader::Serialize (Buffer::Iterator i ) const
 {
-  i.WriteU8 (m_reserved);
+  i.WriteHtonU32 (m_ackR1);
+  i.WriteHtonU32 (m_ackR2);
+  i.WriteHtonU32 (m_hash);
 }
 
 uint32_t
 RrepAckHeader::Deserialize (Buffer::Iterator start )
 {
   Buffer::Iterator i = start;
-  m_reserved = i.ReadU8 ();
+  m_ackR1 = i.ReadNtohU32 ();
+  m_ackR2 = i.ReadNtohU32 ();
+  m_hash = i.ReadNtohU32 ();
+
   uint32_t dist = i.GetDistanceFrom (start);
   NS_ASSERT (dist == GetSerializedSize ());
   return dist;
@@ -478,12 +503,14 @@ RrepAckHeader::Deserialize (Buffer::Iterator start )
 void
 RrepAckHeader::Print (std::ostream &os ) const
 {
+    os << "RREP_ACK: PUF responses: R1 = " << m_ackR1 << ", R2 = " << m_ackR2
+     << " Hash = " << m_hash;
 }
 
 bool
 RrepAckHeader::operator== (RrepAckHeader const & o ) const
 {
-  return m_reserved == o.m_reserved;
+  return (m_ackR1 == o.m_ackR1 && m_ackR2 == o.m_ackR2 && m_hash == o.m_hash);
 }
 
 std::ostream &
@@ -496,6 +523,7 @@ operator<< (std::ostream & os, RrepAckHeader const & h )
 //-----------------------------------------------------------------------------
 // RERR
 //-----------------------------------------------------------------------------
+
 RerrHeader::RerrHeader () :
   m_flag (0), m_reserved (0)
 {
