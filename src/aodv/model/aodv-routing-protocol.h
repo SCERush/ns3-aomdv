@@ -167,6 +167,20 @@ public:
     return m_enableBroadcast;
   }
 
+
+  // Method declared for Blackhole Attack Simulation
+  void SetMaliciousEnable (bool f)
+  {
+    IsMalicious = f; 
+  }                         
+  
+  // Method declared for Blackhole Attack Simulation
+  bool GetMaliciousEnable () const 
+  {
+    return IsMalicious; 
+  } 
+
+
   /**
    * Assign a fixed random variable stream number to the random variables
    * used by this model.  Return the number of streams (possibly zero) that
@@ -246,6 +260,11 @@ private:
   uint16_t m_rreqCount;
   /// Number of RERRs used for RERR rate control
   uint16_t m_rerrCount;
+  
+  /// Set node as malicious. Dropping every packet received.
+  bool IsMalicious;                                             
+  // Variable declared for Blackhole Attack Simulation
+  int m_flag;
 
 private:
   /// Start protocol operation
